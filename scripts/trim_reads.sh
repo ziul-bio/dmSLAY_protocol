@@ -4,50 +4,50 @@
 set -euo pipefail
 
 # Usage:
-# bash scripts/trim_reads_2.sh \
+# bash scripts/trim_reads.sh \
 #     -i data/FASTQ_merged \
 #     -o data/FASTA_trimmed \
-#     -a data/adapter_left.fasta \
-#     -b data/adapter_right.fasta \
 #     -t 32 \
-#     -f CTCCAGCTGCGGGTATCGGAGGAACC \
-#     -r CATGCCTGCAGGTCGAC
+#     -5 CTCCAGCTGCGGGTATCGGAGGAACC \
+#     -3 GTCGACCTGCAGGCATG
 
 
 # Default parameters
 INPUT_DIR=""
 TRIMMED_DIR="data/FASTA_trimmed"
 
-ADAPTER_LEFT="data/adapter_left.fasta"
-ADAPTER_RIGHT="data/adapter_right.fasta"
+ADAPTER_LEFT=""
+ADAPTER_RIGHT=""
 
 THREADS=50
 
-FORWARD_AMPLICON="CTCCAGCTGCGGGTATCGGAGGAACC"
-REVERSE_AMPLICON="CATGCCTGCAGGTCGAC"
+FIVE_PRIME_FLANK="CTCCAGCTGCGGGTATCGGAGGAACC"
+THREE_PRIME_FLANK="GTCGACCTGCAGGCATG"
 
 
 # Parse arguments
-while getopts ":i:o:a:b:t:f:r:h" opt; do
+while getopts ":i:o:a:b:t:f:r:5:3:h" opt; do
     case "$opt" in
         i) INPUT_DIR="$OPTARG" ;;
         o) TRIMMED_DIR="$OPTARG" ;;
         a) ADAPTER_LEFT="$OPTARG" ;;
         b) ADAPTER_RIGHT="$OPTARG" ;;
         t) THREADS="$OPTARG" ;;
-        f) FORWARD_AMPLICON="$OPTARG" ;;
-        r) REVERSE_AMPLICON="$OPTARG" ;;
+        f|5) FIVE_PRIME_FLANK="$OPTARG" ;;
+        r|3) THREE_PRIME_FLANK="$OPTARG" ;;
         h)
             echo "Usage: $0 -i INPUT_DIR [options]"
             echo ""
             echo "Options:"
             echo "  -i  Input FASTQ directory (required)"
             echo "  -o  Output FASTA directory (default: $TRIMMED_DIR)"
-            echo "  -a  Left adapter file (default: $ADAPTER_LEFT)"
-            echo "  -b  Right adapter file (default: $ADAPTER_RIGHT)"
+            echo "  -a  Optional left adapter file (overrides -5)"
+            echo "  -b  Optional right adapter file (overrides -3)"
             echo "  -t  Number of threads (default: $THREADS)"
-            echo "  -f  Forward amplicon sequence"
-            echo "  -r  Reverse amplicon sequence"
+            echo "  -5  5-prime (forward) flanking sequence"
+            echo "  -3  3-prime (reverse) flanking sequence"
+            echo "  -f  Alias for -5"
+            echo "  -r  Alias for -3"
             echo "  -h  Display this help message"
             exit 0
             ;;
@@ -93,15 +93,6 @@ for cmd in seqkit flexbar; do
 done
 
 
-# Check adapter files
-for adapter in "$ADAPTER_LEFT" "$ADAPTER_RIGHT"; do
-    if [[ ! -f "$adapter" ]]; then
-        echo "Error: adapter file not found: $adapter"
-        exit 1
-    fi
-done
-
-
 # Create output directory
 mkdir -p "$TRIMMED_DIR"
 
@@ -110,13 +101,65 @@ mkdir -p "$TRIMMED_DIR"
 TEMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TEMP_DIR"' EXIT
 
+normalize_sequence() {
+    printf '%s' "$1" | tr '[:lower:]' '[:upper:]' | tr -d '[:space:]'
+}
+
+reverse_complement() {
+    python3 - "$1" <<'PY'
+import sys
+
+sequence = sys.argv[1].upper()
+complement = str.maketrans(
+    "ACGTURYKMSWBVDHN",
+    "TGCAAYRMKSWVB DHN".replace(" ", ""),
+)
+print(sequence.translate(complement)[::-1])
+PY
+}
+
+FIVE_PRIME_FLANK="$(normalize_sequence "$FIVE_PRIME_FLANK")"
+THREE_PRIME_FLANK="$(normalize_sequence "$THREE_PRIME_FLANK")"
+if [[ -z "$FIVE_PRIME_FLANK" || -z "$THREE_PRIME_FLANK" ]]; then
+    echo "Error: 5-prime and 3-prime flanking sequences must not be empty."
+    exit 1
+fi
+
+REVERSE_AMPLICON="$(reverse_complement "$THREE_PRIME_FLANK")"
+
+# Flexbar trims in read orientation. Use the 5' flank on the left and the
+# original 3' flank on the right; only the seqkit -R sequence is reversed.
+printf '>five_prime_flank\n%s\n' "$FIVE_PRIME_FLANK" > "${TEMP_DIR}/five_prime_flank.fasta"
+printf '>three_prime_flank\n%s\n' "$THREE_PRIME_FLANK" > "${TEMP_DIR}/three_prime_flank.fasta"
+
+if [[ -z "$ADAPTER_LEFT" ]]; then
+    ADAPTER_LEFT="${TEMP_DIR}/five_prime_flank.fasta"
+fi
+if [[ -z "$ADAPTER_RIGHT" ]]; then
+    ADAPTER_RIGHT="${TEMP_DIR}/three_prime_flank.fasta"
+fi
+
+if [[ -f "$ADAPTER_LEFT" ]]; then
+    HAS_ADAPTER_LEFT=true
+else
+    HAS_ADAPTER_LEFT=false
+fi
+if [[ -f "$ADAPTER_RIGHT" ]]; then
+    HAS_ADAPTER_RIGHT=true
+else
+    HAS_ADAPTER_RIGHT=false
+fi
+
 
 # Identify input files
 shopt -s nullglob
-FASTQ_FILES=("$INPUT_DIR"/*_merged.fastq.gz)
+FASTQ_FILES=()
+for pattern in "*_merged.fastq.gz" "*_merged.fq.gz" "*_merged.fastq" "*_merged.fq"; do
+    FASTQ_FILES+=("$INPUT_DIR"/$pattern)
+done
 
 if [[ ${#FASTQ_FILES[@]} -eq 0 ]]; then
-    echo "Error: no *_merged.fastq.gz files found in $INPUT_DIR"
+    echo "Error: no merged FASTQ files found in $INPUT_DIR"
     exit 1
 fi
 
@@ -131,6 +174,9 @@ echo "Temporary directory: $TEMP_DIR"
 echo "Output directory: $TRIMMED_DIR"
 echo "Threads: $THREADS"
 echo "Samples found: ${#FASTQ_FILES[@]}"
+echo "5-prime flank: $FIVE_PRIME_FLANK"
+echo "3-prime flank: $THREE_PRIME_FLANK"
+echo "3-prime reverse complement for seqkit -R: $REVERSE_AMPLICON"
 echo ""
 
 
@@ -143,7 +189,13 @@ for FASTQ in "${FASTQ_FILES[@]}"; do
 
     # Extract sample name
     filename=$(basename "$FASTQ")
-    sample="${filename%_merged.fastq.gz}"
+    sample="${filename}"
+    for suffix in "_merged.fastq.gz" "_merged.fq.gz" "_merged.fastq" "_merged.fq"; do
+        if [[ "$sample" == *"$suffix" ]]; then
+            sample="${sample%"$suffix"}"
+            break
+        fi
+    done
 
     echo "------------------------------------------------------------"
     echo "Processing sample: $sample"
@@ -154,36 +206,39 @@ for FASTQ in "${FASTQ_FILES[@]}"; do
     echo "Filtering reads by amplicon and converting to FASTA..."
 
     seqkit amplicon --threads "$THREADS" -m 2 \
-        -F "$FORWARD_AMPLICON" \
+        -F "$FIVE_PRIME_FLANK" \
         -R "$REVERSE_AMPLICON" \
         "$FASTQ" | \
         seqkit fq2fa --threads "$THREADS" \
         > "${TEMP_DIR}/${sample}.fasta"
 
 
-    # Step 2: Trim left adapter
-    echo "Trimming left adapter..."
-    flexbar --threads "$THREADS" -ae 0.1 \
-        --reads "${TEMP_DIR}/${sample}.fasta" \
-        --adapters "$ADAPTER_LEFT" \
-        --adapter-trim-end LEFT \
-        --target "${TEMP_DIR}/${sample}_left_tmp"
+    CURRENT="${TEMP_DIR}/${sample}.fasta"
 
-
-    # Validate intermediate output
-    if [[ ! -f "${TEMP_DIR}/${sample}_left_tmp.fasta" ]]; then
-        echo "Error: Flexbar did not generate the left-trimmed FASTA for $sample."
-        exit 1
+    if [[ "$HAS_ADAPTER_LEFT" == true ]]; then
+        echo "Trimming left adapter..."
+        flexbar --threads "$THREADS" -ae 0.1 \
+            --reads "$CURRENT" \
+            --adapters "$ADAPTER_LEFT" \
+            --adapter-trim-end LEFT \
+            --target "${TEMP_DIR}/${sample}_left_tmp"
+        CURRENT="${TEMP_DIR}/${sample}_left_tmp.fasta"
+        if [[ ! -f "$CURRENT" ]]; then
+            echo "Error: Flexbar did not generate the left-trimmed FASTA for $sample."
+            exit 1
+        fi
     fi
 
-
-    # Step 3: Trim right adapter
-    echo "Trimming right adapter..."
-    flexbar --threads "$THREADS" -ae 0.1 \
-        --reads "${TEMP_DIR}/${sample}_left_tmp.fasta" \
-        --adapters "$ADAPTER_RIGHT" \
-        --adapter-trim-end RIGHT \
-        --target "${TRIMMED_DIR}/${sample}"
+    if [[ "$HAS_ADAPTER_RIGHT" == true ]]; then
+        echo "Trimming right adapter..."
+        flexbar --threads "$THREADS" -ae 0.1 \
+            --reads "$CURRENT" \
+            --adapters "$ADAPTER_RIGHT" \
+            --adapter-trim-end RIGHT \
+            --target "${TRIMMED_DIR}/${sample}"
+    elif [[ "$CURRENT" != "${TRIMMED_DIR}/${sample}.fasta" ]]; then
+        cp "$CURRENT" "${TRIMMED_DIR}/${sample}.fasta"
+    fi
 
 
     # Processing time

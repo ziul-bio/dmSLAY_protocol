@@ -1,50 +1,78 @@
-import os
-import pandas as pd
+import polars as pl
 from Bio import SeqIO
 from Bio.Seq import Seq
 from collections import Counter
+from pathlib import Path
+import hashlib
 
 import argparse
 parser = argparse.ArgumentParser(description='Count the number of reads in a FASTA file')
 parser.add_argument('--input_dir', '-i', required=True, help='The directory containing the FASTA files')
 parser.add_argument('--output_dir','-o', required=True, help='The directory to write the results to')
+parser.add_argument('--minimum-count', '-m', type=int, default=10,
+                    help='Minimum total read count to include a peptide (default: 10)')
 args = parser.parse_args()
 
-os.makedirs(args.output_dir, exist_ok=True)
+input_dir = Path(args.input_dir)
+output_dir = Path(args.output_dir)
+if not input_dir.is_dir():
+    parser.error(f"input directory does not exist: {input_dir}")
+output_dir.mkdir(parents=True, exist_ok=True)
 
-# Step 1: Read the FASTA file
-sample_counts = []
+print('')
+print("#####################################################")
+print("                    Counting Reads                   ")
+print("#####################################################")
 
-for file in os.listdir(args.input_dir):
-    if file.endswith(".fasta"):
-        print(f"Counting reads for {file}.")
+# Count nucleotide sequences and aggregate synonymous sequences by peptide.
+sample_names = []
+peptide_counts = {}
 
-        input_fasta = os.path.join(args.input_dir, file)
-        sample = file.removesuffix(".fasta")
+for input_fasta in sorted(input_dir.glob("*.fasta")):
+    print(f"Counting reads for {input_fasta.name}.")
+    sample = input_fasta.stem
+    sample_names.append(sample)
 
-        # Count sequences
-        counts = Counter()
-        for record in SeqIO.parse(input_fasta, "fasta"):
-            counts[str(record.seq)] += 1
+    counts = Counter()
+    for record in SeqIO.parse(input_fasta, "fasta"):
+        counts[str(record.seq).upper()] += 1
 
-        # Store counts as a Series
-        sample_counts.append(pd.Series(counts, name=sample))
+    for sequence, count in counts.items():
+        peptide = str(Seq(sequence).translate(to_stop=True))
+        peptide_counts.setdefault(peptide, {})[sample] = (
+            peptide_counts.setdefault(peptide, {}).get(sample, 0) + count
+        )
 
-# Combine all samples
-merged = pd.concat(sample_counts, axis=1).fillna(0).astype(int)
-merged = merged.reset_index()
-merged = merged.rename(columns={'index': 'Sequence'})
-print(merged.head())
+if not sample_names:
+    parser.error(f"no .fasta files found in {input_dir}")
 
-# Translate sequences to peptides and group by peptide
-merged['peptide'] = merged['Sequence'].apply(lambda x: "".join(Seq(x).translate(to_stop=True)))
-merged = merged.groupby(["peptide"], as_index=False).sum().copy()
+rows = []
+for peptide, counts_by_sample in peptide_counts.items():
+    row = {"peptide": peptide}
+    row.update({sample: counts_by_sample.get(sample, 0) for sample in sample_names})
+    rows.append(row)
 
-# Compute row sums and peptide lengths
-merged['row_sum'] = merged.iloc[:, 2:].sum(axis=1)
-merged.sort_values(by='row_sum', ascending=False, inplace=True)
-merged['peptide_length'] = merged['peptide'].apply(len)
+merged = pl.DataFrame(rows, schema={"peptide": pl.String, **{
+    sample: pl.Int64 for sample in sample_names
+}})
+merged = merged.with_columns(
+    pl.sum_horizontal(sample_names).alias("row_sum"),
+    pl.col("peptide").str.len_chars().alias("peptide_length"),
+)
+filtered = merged.filter(pl.col("row_sum") >= args.minimum_count)
+filtered = filtered.sort("row_sum", descending=True)
 
 
-# Save results, filtering out peptides with low read counts
-merged.query('row_sum > 10').to_csv(f"{args.output_dir}/peptide_read_counts.txt", sep="\t")
+filtered = filtered.with_columns(
+    pl.col("peptide")
+    .map_elements(
+        lambda seq: hashlib.sha256(seq.encode()).hexdigest()[:12],
+        return_dtype=pl.String,
+    )
+    .alias("ID")
+)
+
+output_file = output_dir / "peptide_read_counts.txt"
+filtered.write_csv(output_file, separator="\t")
+
+print(f"Done! Results saved to {output_file}")
