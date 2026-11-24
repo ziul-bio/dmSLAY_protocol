@@ -149,11 +149,17 @@ pixi run deseq2 \
 
 ## Troubleshooting installation
 
-If Pixi is interrupted while installing, rerun `pixi install`. On a network-backed
-cache, point Pixi to a local cache to reduce filesystem I/O:
+If Pixi is interrupted while installing or got stuck, rerun `pixi install`.
 
 ```bash
+# First remove the generated workspace environment
+rm -rf .pixi
+rm -f pixi.lock
+
+# And Then: On a network-backed cache, point Pixi to a local cache to reduce filesystem I/O:
 export PIXI_CACHE_DIR="/tmp/pixi-cache-${USER}"
 export PIXI_NO_PROGRESS=1
+
+# and recreate it:
 pixi install
 ```
