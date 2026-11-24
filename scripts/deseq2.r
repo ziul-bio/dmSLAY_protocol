@@ -1,5 +1,8 @@
-library(DESeq2)
-library(ggplot2)
+
+suppressPackageStartupMessages({
+  library(DESeq2)
+  library(ggplot2)
+})
 
 args <- commandArgs(trailingOnly = TRUE)
 
@@ -185,6 +188,7 @@ if (nrow(dds) == 0) {
 }
 
 # Main DESeq2 analysis: relevel the group factor to set the reference group, then run DESeq.
+print(paste("Running DESeq2 with reference group:", reference))
 dds$group <- droplevels(relevel(dds$group, ref = reference))
 dds <- DESeq(dds)
 
@@ -211,9 +215,11 @@ for (treatment_group in treatments) {
   if (treatment_group == reference) {
     next
   }
-
+  # Perform DESeq2 results extraction for the current treatment group compared to the reference group.
+  cat("\nAnalyzing ", treatment_group, " vs ", reference, "\n", sep = "")
   result <- results(dds, alpha = alpha,
                     contrast = c("group", treatment_group, reference))
+  
   result$DE <- ifelse(
     !is.na(result$padj) & result$padj < alpha &
       abs(result$log2FoldChange) >= lfc_threshold,
@@ -254,6 +260,14 @@ for (treatment_group in treatments) {
   ]
   top_de <- top_de[order(top_de$padj, na.last = TRUE), , drop = FALSE]
 
+  up <- sum(result_table$DE == "Upregulated")
+  down <- sum(result_table$DE == "Downregulated")
+
+  x_range <- range(result_table$log2FoldChange, finite = TRUE)
+  y_range <- range(-log10(result_table$pvalue), finite = TRUE)
+  annotation_x <- x_range[1] + c(0.2, 0.8) * diff(x_range)
+  annotation_y <- y_range[1] + c(0.8, 0.75) * diff(y_range)
+
   # create a volcano plot for the current comparison
   volcano <- ggplot(
     result_table,
@@ -273,6 +287,14 @@ for (treatment_group in treatments) {
       x = "log2 fold change",
       y = expression(-log[10](p-value)),
       color = "Differential expression"
+    ) +
+    annotate(
+      geom = "text", x = annotation_x, y = rep(annotation_y[1], 2),
+      label = c("Down", "Up"), size = 5
+    ) +
+    annotate(
+      geom = "text", x = annotation_x, y = rep(annotation_y[2], 2),
+      label = c(down, up), size = 5
     ) +
     theme_bw()
 
