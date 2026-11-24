@@ -35,8 +35,8 @@ if (is.na(alpha) || alpha <= 0 || alpha >= 1) {
 if (is.na(lfc_threshold) || lfc_threshold < 0) {
   stop("--lfc-threshold must be zero or greater")
 }
-if (is.na(minimum_count) || minimum_count < 0) {
-  stop("--minimum-count must be zero or greater")
+if (is.na(minimum_count) || minimum_count <= 0) {
+  stop("--minimum-count must be greater than 0")
 }
 if (!file.exists(count_file)) {
   stop("Count table not found: ", count_file)
@@ -63,6 +63,11 @@ if (any(is.na(counts)) || any(counts < 0)) {
 }
 rownames(counts) <- count_matrix$ID
 
+
+
+# Parse comma- or semicolon-separated SAMPLE=GROUP (or SAMPLE:GROUP) entries.
+# Returns a named vector aligned to sample_columns; missing samples remain NA.
+# Stops if an entry is malformed or names a sample absent from the count table.
 parse_groups <- function(value) {
   entries <- trimws(strsplit(value, "[,;]", perl = TRUE)[[1]])
   entries <- entries[nzchar(entries)]
@@ -85,6 +90,8 @@ parse_groups <- function(value) {
   groups
 }
 
+
+# if --groups is provided, parse it; otherwise, read the coldata file.
 if (!is.null(groups_arg)) {
   coldata <- data.frame(
     row.names = sample_columns,
@@ -100,6 +107,8 @@ if (!is.null(groups_arg)) {
   } else {
     "\t"
   }
+
+  # Building the coldate data frame from the supplied file. We try to guess which columns are the sample and group columns.
   supplied_coldata <- read.delim(coldata_file, sep = separator, check.names = FALSE)
 
   sample_column <- intersect(
@@ -121,6 +130,8 @@ if (!is.null(groups_arg)) {
     stop("Duplicate sample in coldata: ", duplicate_samples[1])
   }
 
+# building the coldata data frame with row names as sample names and a single group column. 
+# We check for missing or extra samples compared to the count table.
   coldata <- data.frame(
     row.names = as.character(supplied_coldata[[sample_column]]),
     group = as.character(supplied_coldata[[group_column]]),
@@ -157,6 +168,10 @@ if (!reference %in% groups) {
 }
 coldata$group <- factor(coldata$group, levels = c(reference, setdiff(groups, reference)))
 
+
+######################################################
+#      Create DESeq2 dataset and run the analysis
+######################################################
 counts <- counts[, rownames(coldata), drop = FALSE]
 dds <- DESeqDataSetFromMatrix(
   countData = counts,
@@ -168,11 +183,14 @@ dds <- dds[keep, , drop = FALSE]
 if (nrow(dds) == 0) {
   stop("No peptides remain after the minimum-count filter")
 }
+
+# Main DESeq2 analysis: relevel the group factor to set the reference group, then run DESeq.
 dds$group <- droplevels(relevel(dds$group, ref = reference))
 dds <- DESeq(dds)
 
-dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
 
+
+# By default, analyze every non-reference group; otherwise parse the requested groups.
 if (is.null(treatment) || !nzchar(treatment)) {
   treatments <- setdiff(levels(coldata$group), reference)
 } else {
@@ -180,6 +198,12 @@ if (is.null(treatment) || !nzchar(treatment)) {
   treatments <- treatments[nzchar(treatments)]
 }
 
+
+
+# Create the output directory and choose groups to compare against the reference.
+dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+
+# Loop through each treatment group and perform DESeq2 analysis against the reference group.
 for (treatment_group in treatments) {
   if (!treatment_group %in% levels(coldata$group)) {
     stop("Treatment group '", treatment_group, "' was not found")
@@ -211,6 +235,7 @@ for (treatment_group in treatments) {
     sort = FALSE
   )
 
+  # Save the result table to a TSV file in the output directory, with a filename that includes the treatment and reference group names.
   comparison <- paste0(treatment_group, "_vs_", reference)
   safe_comparison <- gsub("[^A-Za-z0-9._-]", "_", comparison)
   write.table(
@@ -221,13 +246,15 @@ for (treatment_group in treatments) {
     row.names = FALSE
   )
 
+  # this will list only the top DE peptides with the negative log2FoldChange (downregulated) and padj < alpha, sorted by padj.
   top_de <- result_table[
     !is.na(result_table$padj) &
       result_table$padj < alpha &
-      abs(result_table$log2FoldChange) >= lfc_threshold,
+      result_table$log2FoldChange < -(lfc_threshold),
   ]
   top_de <- top_de[order(top_de$padj, na.last = TRUE), , drop = FALSE]
 
+  # create a volcano plot for the current comparison
   volcano <- ggplot(
     result_table,
     aes(x = log2FoldChange, y = -log10(pvalue))
