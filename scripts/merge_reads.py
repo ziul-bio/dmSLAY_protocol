@@ -32,9 +32,16 @@ def main():
     args.output_dir.mkdir(parents=True, exist_ok=True)
     args.report_dir.mkdir(parents=True, exist_ok=True)
 
+    print("")
+    print("************************************************************")
+    print("          Merging paired FASTQ reads with fastp"             )
+    print("************************************************************")
+
     for sample, read1, read2 in pairs:
+        print("")
         print("=" * 60)
-        print(f"Processing sample: {sample}")
+        print(f"              Processing sample: {sample}")
+        print("=" * 60)
         print(f"R1: {read1}")
         print(f"R2: {read2}")
 
