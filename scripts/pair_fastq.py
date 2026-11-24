@@ -72,7 +72,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Discover paired FASTQ files using common Illumina-style naming patterns."
     )
-    parser.add_argument("input_dir", type=Path)
+    parser.add_argument("-i", "--input-dir", required=True, type=Path)
     args = parser.parse_args()
 
     if not args.input_dir.is_dir():
