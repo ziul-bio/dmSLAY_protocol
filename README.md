@@ -99,7 +99,7 @@ Results and volcano plots are written to `results/deseq2/` by default.
 ## Direct tasks
 
 ```bash
-pixi run merge --input-dir /path/to/reads
+pixi run merge --input-dir path/to/FASTQ
 pixi run trim --input-dir data/FASTQ_merged \
   -5 CTCCAGCTGCGGGTATCGGAGGAACC \
   -3 GTCGACCTGCAGGCATG
