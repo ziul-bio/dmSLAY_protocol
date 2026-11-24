@@ -1,68 +1,99 @@
 # dmSLAY protocol
 
-This repository provides a reproducible Pixi workflow for merging paired amplicon reads, trimming their amplicon flanks/adapters, and counting peptide sequences.
+This repository provides a reproducible Pixi workflow for processing paired amplicon reads:
+merge reads, trim amplicon flanks and adapters, count peptide sequences, and optionally
+run differential-expression analysis with DESeq2.
 
-## Requirements
+## 1. Install the environment
 
-Install [Pixi](https://pixi.sh/) and run commands from the repository root:
+Install [Pixi](https://pixi.sh/), then run these commands from the repository root:
 
 ```bash
 pixi install
-pixi run analyze --input-dir /path/to/paired/reads \
-  --five-prime-sequence CTCCAGCTGCGGGTATCGGAGGAACC \
-  --three-prime-sequence GTCGACCTGCAGGCATG
+pixi run analyze --help
 ```
 
-The 5-prime and 3-prime values are the flanking sequences immediately outside the region of interest. They default to the example dataset values:
+Pixi installs the tools and R/Python packages declared in `pixi.toml`. The committed
+`pixi.lock` records the resolved versions for reproducible environments.
+
+## 2. Prepare paired-read inputs
+
+Place the FASTQ files in an input directory. Every sample must have both mates.
+The workflow recognizes common naming patterns such as:
+
+```text
+sample_R1.fastq.gz   sample_R2.fastq.gz
+sample_1.fastq.gz    sample_2.fastq.gz
+sample_F.fastq.gz    sample_R.fastq.gz
+sample_L001_R1_001.fastq.gz   sample_L001_R2_001.fastq.gz
+```
+
+If a mate is missing, merging stops and prints the sample and unmatched filename.
+
+The 5-prime and 3-prime values are the flanking sequences immediately outside the
+region of interest. They default to the example dataset values:
 
 ```text
 5-prime: CTCCAGCTGCGGGTATCGGAGGAACC
 3-prime: GTCGACCTGCAGGCATG
 ```
 
-For amplicon selection, the 5-prime flank is used as `seqkit amplicon -F`, while the 3-prime flank is reverse-complemented and used as `-R`. For right-side trimming, Flexbar receives the original 3-prime flank.
+For amplicon selection, the 5-prime flank is passed to `seqkit amplicon -F`. The
+3-prime flank is reverse-complemented for `seqkit amplicon -R`. By default, the
+original flanks are also used as the left and right Flexbar adapter sequences.
+Supply adapter FASTA files to override either default.
 
-## Input
+## 3. Run the full analysis
 
-All reads must be paired. Files may use common naming patterns, including:
+Run the complete workflow with:
 
-- `sample_R1.fastq.gz` and `sample_R2.fastq.gz`
-- `sample_1.fastq.gz` and `sample_2.fastq.gz`
-- `sample_F.fastq.gz` and `sample_R.fastq.gz`
-- `sample_L001_R1_001.fastq.gz` and `sample_L001_R2_001.fastq.gz`
-
-Missing mates and duplicate read roles are reported as errors rather than silently skipped.
-
-## Options
-
-```text
---input-dir DIR          Directory containing paired reads
---merged-dir DIR         Merged FASTQ output
---trimmed-dir DIR        Trimmed FASTA output
---results-dir DIR        Count table output
---report-dir DIR         fastp HTML/JSON reports
---adapter-left FILE      Optional left adapter FASTA override
---adapter-right FILE     Optional right adapter FASTA override
---five-prime-sequence SEQ   5-prime/forward amplicon flank
---three-prime-sequence SEQ  3-prime/reverse amplicon flank
---threads N              Sequencing worker threads
---minimum-count N        Minimum peptide read count (default: 10)
---coldata-file FILE      TSV/CSV metadata with sample and group/condition columns
---groups SPEC            Inline groups: SAMPLE=GROUP,SAMPLE=GROUP
---deseq2-reference GROUP DESeq2 reference group
---deseq2-treatment GROUP DESeq2 treatment group(s), comma-separated
---deseq2-output-dir DIR  DESeq2 output directory
---deseq2-minimum-count N Minimum peptide count for DESeq2 (default: 30)
+```bash
+pixi run analyze --input-dir /path/to/paired/reads
 ```
 
-Adapter trimming is skipped when adapter files are not supplied or do not exist.
+To override the flank defaults:
 
-## DESeq2 grouping
+```bash
+pixi run analyze --input-dir /path/to/paired/reads \
+  --five-prime-sequence CTCCAGCTGCGGGTATCGGAGGAACC \
+  --three-prime-sequence GTCGACCTGCAGGCATG
+```
 
-DESeq2 is run after the count table is generated when `--coldata-file` or `--groups`
-is supplied.
+The workflow runs these stages in order:
 
-The simplest option is an inline group specification:
+- **Merge:** `fastp` merges each pair into `data/FASTQ_merged/` and writes HTML/JSON
+  reports to `results/fastp_reports/`. Unmerged R1/R2 reads are also retained.
+- **Trim:** `seqkit` selects the amplicon and `flexbar` trims adapters, writing FASTA
+  files to `data/FASTA_trimmed/`.
+- **Count:** translated peptide sequences are counted across samples and written to
+  `results/counts/peptide_read_counts.txt`. By default, peptides with fewer than 10
+  total reads are filtered out.
+- **DESeq2 (optional):** runs only when you provide `--coldata-file` or `--groups`.
+  Results are written to `results/deseq2/` by default.
+
+The main workflow options are:
+
+| Option | Purpose | Default |
+| --- | --- | --- |
+| `--input-dir DIR` | Paired FASTQ input directory | `data/FASTQ_raw/` |
+| `--merged-dir DIR` | Merged FASTQ output | `data/FASTQ_merged/` |
+| `--trimmed-dir DIR` | Trimmed FASTA output | `data/FASTA_trimmed/` |
+| `--results-dir DIR` | Peptide-count output directory | `results/counts/` |
+| `--report-dir DIR` | fastp HTML/JSON reports | `results/fastp_reports/` |
+| `--threads N` | Worker threads for trimming tools | `32` |
+| `--minimum-count N` | Minimum total reads per peptide | `10` |
+| `--five-prime-sequence SEQ` | 5-prime flank | Example sequence above |
+| `--three-prime-sequence SEQ` | 3-prime flank | Example sequence above |
+| `--adapter-left FILE` | Left adapter FASTA override | 5-prime flank |
+| `--adapter-right FILE` | Right adapter FASTA override | 3-prime flank |
+
+Run `pixi run analyze --help` for the complete option list.
+
+## 4. Configure optional DESeq2 analysis
+
+DESeq2 requires a group for every sample. Provide groups inline or in a TSV/CSV file.
+
+For inline groups, use comma- or semicolon-separated `SAMPLE=GROUP` entries:
 
 ```bash
 pixi run analyze --input-dir /path/to/paired/reads \
@@ -71,9 +102,9 @@ pixi run analyze --input-dir /path/to/paired/reads \
   --deseq2-treatment Treated
 ```
 
-For larger experiments, provide a TSV or CSV file. Recognized sample columns are
-`sample`, `sample_id`, `sample_name`, `Sample`, `SampleID`, or `name`; recognized
-group columns are `group`, `condition`, `treatment`, or `phenotype`.
+For a metadata file, the script recognizes these sample-column names:
+`sample`, `sample_id`, `sample_name`, `Sample`, `SampleID`, or `name`. It recognizes
+these group-column names: `group`, `condition`, `treatment`, or `phenotype`.
 
 ```tsv
 sample	condition
@@ -92,23 +123,37 @@ pixi run analyze --input-dir /path/to/paired/reads \
   --deseq2-treatment Treated
 ```
 
-Every count-table sample must occur exactly once in the metadata. If no treatment
-is supplied, DESeq2 compares every non-reference group against the reference.
-Results and volcano plots are written to `results/deseq2/` by default.
+Every count-table sample must occur exactly once in the metadata. If no reference
+group is specified, the first group is used. If no treatment is specified, each
+non-reference group is compared against the reference. Set `--deseq2-output-dir`
+to change the output location. The minimum count for DESeq2 is 30 by default.
 
-## Direct tasks
+## 5. Run individual stages
+
+These tasks are useful when you want to run or repeat a single stage. Run them in
+pipeline order, using the previous stage's output as the next stage's input.
 
 ```bash
-pixi run merge --input-dir path/to/FASTQ
+pixi run merge --input-dir /path/to/paired/reads
 pixi run trim -i data/FASTQ_merged \
   -5 CTCCAGCTGCGGGTATCGGAGGAACC \
   -3 GTCGACCTGCAGGCATG
-pixi run count --input-dir data/FASTA_trimmed --output-dir results/counts
-
+pixi run count -i data/FASTA_trimmed -o results/counts
 pixi run deseq2 \
   --count-file results/counts/peptide_read_counts.txt \
   --coldata-file data/coldata.tsv \
   --reference Control \
   --treatment Treated \
   --output-dir results/deseq2
+```
+
+## Troubleshooting installation
+
+If Pixi is interrupted while installing, rerun `pixi install`. On a network-backed
+cache, point Pixi to a local cache to reduce filesystem I/O:
+
+```bash
+export PIXI_CACHE_DIR="/tmp/pixi-cache-${USER}"
+export PIXI_NO_PROGRESS=1
+pixi install
 ```
