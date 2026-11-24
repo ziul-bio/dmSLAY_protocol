@@ -1,9 +1,12 @@
 import polars as pl
 from Bio import SeqIO
-from Bio.Seq import Seq
+from Bio.Seq import Seq, BiopythonWarning
 from collections import Counter
 from pathlib import Path
 import hashlib
+
+import warnings
+warnings.filterwarnings("ignore", category=BiopythonWarning, message="Partial codon")
 
 import argparse
 parser = argparse.ArgumentParser(description='Count the number of reads in a FASTA file')
@@ -76,3 +79,4 @@ output_file = output_dir / "peptide_read_counts.txt"
 filtered.write_csv(output_file, separator="\t")
 
 print(f"Done! Results saved to {output_file}")
+print("\n" * 3, end="")  # adds three blank lines

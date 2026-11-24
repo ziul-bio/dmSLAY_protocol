@@ -39,9 +39,9 @@ def main():
 
     for sample, read1, read2 in pairs:
         print("")
-        print("=" * 60)
+        print("-" * 60)
         print(f"              Processing sample: {sample}")
-        print("=" * 60)
+        print("-" * 60)
         print(f"R1: {read1}")
         print(f"R2: {read2}")
 
@@ -58,8 +58,9 @@ def main():
         ]
         subprocess.run(command, check=True)
 
-    print("=" * 60)
+    print("-" * 60)
     print(f"Processing complete. Total samples processed: {len(pairs)}")
+    print("\n" * 3, end="")  # adds three blank lines
 
 
 if __name__ == "__main__":

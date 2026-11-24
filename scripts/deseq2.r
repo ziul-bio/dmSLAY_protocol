@@ -1,3 +1,9 @@
+cat(
+  "\n****************************************\n",
+  "        Starting DESeq2 analysis...      \n",
+  "****************************************\n",
+  sep = ""
+)
 
 suppressPackageStartupMessages({
   library(DESeq2)
