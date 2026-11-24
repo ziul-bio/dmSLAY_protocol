@@ -101,31 +101,84 @@ mkdir -p "$TRIMMED_DIR"
 TEMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TEMP_DIR"' EXIT
 
-normalize_sequence() {
+
+
+normalize_sequence() { # Normalize a DNA sequence to uppercase and remove whitespace
     printf '%s' "$1" | tr '[:lower:]' '[:upper:]' | tr -d '[:space:]'
 }
+
+
 
 reverse_complement() {
     python3 - "$1" <<'PY'
 import sys
 
-sequence = sys.argv[1].upper()
-complement = str.maketrans(
-    "ACGTURYKMSWBVDHN",
-    "TGCAAYRMKSWVB DHN".replace(" ", ""),
-)
-print(sequence.translate(complement)[::-1])
+def reverse_complement(sequence):
+    """
+    # Calculate the reverse complement of a DNA/RNA sequence.
+
+    # Supports standard nucleotides (A, C, G, T, U) and IUPAC
+    # nucleotide ambiguity codes:
+    #                     R = A or G (purine)
+    #                     Y = C or T (pyrimidine)
+    #                     K = G or T
+    #                     M = A or C
+    #                     S = G or C
+    #                     W = A or T
+    #                     B = C, G, or T
+    #                     V = A, C, or G
+    #                     D = A, G, or T
+    #                     H = A, C, or T
+    #                     N = any nucleotide
+    # Parameters
+    # ----------
+    # sequence : str
+    #     Input nucleotide sequence.
+
+    # Returns
+    # -------
+    # str
+    #     Reverse complement of the input sequence.
+
+    # Raises
+    # ------
+    # ValueError
+    #     If the sequence contains invalid nucleotide characters.
+    """
+
+    sequence = sequence.upper()
+
+    valid_bases = set("ACGTURYKMSWBVDHN")
+
+    invalid_bases = set(sequence) - valid_bases
+    if invalid_bases:
+        raise ValueError(
+            f"Invalid nucleotide characters: {', '.join(sorted(invalid_bases))}"
+        )
+
+    complement = str.maketrans(
+        "ACGTURYKMSWBVDHN",
+        "TGCAAYRMKSWVB DHN".replace(" ", ""),
+    )
+
+    return sequence.translate(complement)[::-1]
+
+
+try:
+    print(reverse_complement(sys.argv[1]))
+except ValueError as e:
+    sys.exit(f"Error: {e}")
+
 PY
 }
 
+
+
 FIVE_PRIME_FLANK="$(normalize_sequence "$FIVE_PRIME_FLANK")"
 THREE_PRIME_FLANK="$(normalize_sequence "$THREE_PRIME_FLANK")"
-if [[ -z "$FIVE_PRIME_FLANK" || -z "$THREE_PRIME_FLANK" ]]; then
-    echo "Error: 5-prime and 3-prime flanking sequences must not be empty."
-    exit 1
-fi
-
 REVERSE_AMPLICON="$(reverse_complement "$THREE_PRIME_FLANK")"
+
+
 
 # Flexbar trims in read orientation. Use the 5' flank on the left and the
 # original 3' flank on the right; only the seqkit -R sequence is reversed.
@@ -166,7 +219,6 @@ fi
 
 # Pipeline information
 echo "************************************************************"
-echo "              Deep Mutational Scanning"
 echo "                    Read Trimming"
 echo "************************************************************"
 echo "Input directory: $INPUT_DIR"
@@ -198,7 +250,7 @@ for FASTQ in "${FASTQ_FILES[@]}"; do
     done
 
     echo "------------------------------------------------------------"
-    echo "Processing sample: $sample"
+    echo "          Processing sample: $sample"
     echo "------------------------------------------------------------"
 
 
