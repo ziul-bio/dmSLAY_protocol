@@ -89,5 +89,5 @@ filtered = filtered.with_columns(
 output_file = output_dir / "peptide_read_counts.txt"
 filtered.write_csv(output_file, separator="\t")
 
-print(f"Done! Results saved to {output_file}")
+print(f"\nDone! Results saved to {output_file}")
 print("\n" * 3, end="")  # adds three blank lines
