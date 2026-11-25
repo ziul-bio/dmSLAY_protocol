@@ -28,7 +28,6 @@ library(RColorBrewer)
 library(openxlsx)
 
 #set current directory as working directory
-
 setwd(getwd())
 ```
 
@@ -37,7 +36,7 @@ setwd(getwd())
 ## dataframe Counts as matrix
 ```{r}
 # Loading count matrix
-count_matrix <- read.csv("../results/counts/peptide_read_counts.txt", sep="")
+count_matrix <- read.csv("../results/example/counts/peptide_read_counts.txt", sep="")
 
 
 # making ID the rownames of the matrix
@@ -105,151 +104,170 @@ resultsNames(ddsDE)
 ```
 
 
-### Getting the results 
-
-Setting a alpha value of 0.05 for each comparison
 ```{r}
-resOne <- results(ddsDE, alpha = 0.05, contrast=c("group", "Zero", "One"))
-resTen <- results(ddsDE, alpha = 0.05, contrast=c("group", "Zero", "Ten"))
-resHnd <- results(ddsDE, alpha = 0.05, contrast=c("group", "Zero", "Hnd"))
-```
+coef_names <- resultsNames(ddsDE)
 
+comparisons <- coef_names[grepl("_vs_", coef_names)]
 
-## Summary results
+groups <- do.call(
+  rbind,
+  strsplit(comparisons, "_vs_")
+)
 
-1uM IPTG
-```{r}
-summary(resOne)
-```
+groups[, 1] <- sub("^group_", "", groups[, 1])
 
-10uM IPTG
-```{r}
-summary(resTen)
-```
+colnames(groups) <- c("treatment", "reference")
 
-100uM IPTG
-```{r}
-summary(resHnd)
-```
-From these results we can see that more than 502 peptides had a lfc < 0.
-
-
-### Results column description
-```{r}
-mcols(resOne)$description
-```
-
-
-
-## Adding significance DE column to the df results
-
-True DE results if padj<0.05 and absolute log2FoldChange > 1
-```{r}
-# group one vs zero
-resOne$DE <- ifelse(resOne$padj<0.05, "True", "False")
-resOne[which(abs(resOne$log2FoldChange)<1),'DE'] <- "False"
-resOne <- resOne[order(resOne$padj),]
-
-
-# group ten vs zero
-resTen$DE <- ifelse(resTen$padj <0.5, "True", "False")
-resTen[which(abs(resTen$log2FoldChange) <1),'DE'] <- "False"
-resTen <- resTen[order(resTen$padj), ]
-
-
-# group hundred vs zero
-resHnd$DE <- ifelse(resHnd$padj<0.05, "True", "False")
-resHnd[which(abs(resHnd$log2FoldChange)<1),'DE'] <- "False"
-resHnd <- resHnd[order(resHnd$padj),]
-```
-
-
-
-# saving res as a data frame
-```{r}
-one <- as.data.frame(resOne)
-
-ten <- as.data.frame(resTen)
-
-hnd <- as.data.frame(resHnd)
-```
-
-
-
-# filter peptides diferential expressed with lgf <= -1
-```{r}
-peps_DE <- dplyr::filter(hnd, log2FoldChange <= (-1) & DE =="True")
-peps_DE
-```
-
-
-
-# Top defferential expressed peptides with lgf <= -2
-```{r}
-topDE <- dplyr::filter(peps_DE, log2FoldChange <= (-2))
-topDE
-```
-
-
-
-## Creating a dataframe to save the results
-
-Dataframe with just the differential expressed peptides. 
-lfg <= -1 and p. ajusted <= 0.05
-```{r}
-Counts_DE <- filter(count_matrix, row.names(count_matrix) %in% rownames(peps_DE))
-
-Counts_DE$peptide <- rownames(Counts_DE)
-peps_DE$peptide <- rownames(peps_DE)
-
-df_DE <- left_join(Counts_DE, peps_DE, by= "peptide")
-df_DE
-```
-
-
-# Dataframe with all results from deseq2
-```{r}
-one$peptide <- rownames(one)
-
-df1 <- left_join(count_matrix, one, by= "peptide")
-
-df1 <- rename(df1, "baseMean_1uM"=baseMean, "lfcSE_1uM"=lfcSE,"Log2FC_1uM"=log2FoldChange,
-                  "stat_1uM"=stat, "pvalue_1uM"=pvalue, "p.adj_1uM"=padj, "DE_1uM"=DE)
-#df1
-```
-
-
-```{r}
-ten$ID <- as.integer(rownames(ten))
-
-df10 <- left_join(df1, ten, by= "ID")
-df10 <- df10 %>% relocate(ID, .before = Sequence)
-df10 <- rename(df10, "baseMean_10uM"=baseMean, "lfcSE_10uM"=lfcSE,"Log2FC_10uM"=log2FoldChange,
-                  "stat_10uM"=stat, "pvalue_10uM"=pvalue, "p.adj_10uM"=padj, "DE_10uM"=DE)
-head(df10)
+groups
 ```
 
 
 
 ```{r}
-hnd$ID <- as.integer(rownames(hnd))
+res_list <- lapply(seq_len(nrow(groups)), function(i) {
+  results(
+    ddsDE,
+    alpha = 0.05,
+    contrast = c("group", groups[i, "treatment"], groups[i, "reference"])
+  )
+})
 
-df_full <- left_join(df10, hnd, by= "ID")
-df_full <- df_full %>% relocate(ID, .before = Sequence)
-df_full <- rename(df_full, "baseMean_100uM"=baseMean, "lfcSE_100uM"=lfcSE,"Log2FC_100uM"=log2FoldChange,
-                  "stat_100uM"=stat, "pvalue_100uM"=pvalue, "p.adj_100uM"=padj, "DE_100uM"=DE)
+names(res_list) <- comparisons
+```
+
+
+
+
+```{r}
+for (i in seq_len(nrow(groups))) {
+
+  treatment <- groups[i, "treatment"]
+  reference <- groups[i, "reference"]
+  
+  ### Getting the results 
+  #Setting a alpha value of 0.05 for each comparison
+  res <- results(
+    ddsDE,
+    alpha = 0.05,
+    contrast = c("group", treatment, reference)
+  )
+  print(treatment)
+  print(summary(res))
+  res <- as.data.frame(res)
+  res$ID <- rownames(res)
+  
+  # Defining DEs
+  res$DE <- ifelse(
+    !is.na(res$padj) & res$padj < 0.05 &
+      abs(res$log2FoldChange) >= 1,
+    ifelse(res$log2FoldChange > 0, "Upregulated", "Downregulated"),
+    "Not significant"
+  )
+  
+  res$DE <- factor(
+    res$DE,
+    levels = c("Upregulated", "Downregulated", "Not significant")
+  )
+
+  res <- res[order(res$padj), ]
+
+  assign(treatment, res, envir = .GlobalEnv)
+}
+```
+
+
+```{r}
+# Identify available dataframes
+available_groups <- groups[, "treatment"]
+available_groups <- available_groups[
+  vapply(available_groups, exists, logical(1), envir = .GlobalEnv)
+]
+
+# Columns to rename
+result_cols <- c(
+  "baseMean", "lfcSE", "log2FoldChange",
+  "stat", "pvalue", "padj", "DE"
+)
+
+# Start with count matrix
+df_full <- count_matrix
+
+for (g in available_groups) {
+
+  res <- get(g, envir = .GlobalEnv)
+
+  # Add ID from rownames
+  res$ID <- rownames(res)
+
+  # Rename DESeq2 columns
+  cols_to_rename <- intersect(result_cols, names(res))
+
+  names(res)[match(cols_to_rename, names(res))] <-
+    paste0(cols_to_rename, "_", g)
+
+  # Merge
+  df_full <- left_join(df_full, res, by = "ID")
+}
+
+# Move ID before Sequence
+df_full <- relocate(df_full, ID, .before = peptide)
+
 head(df_full)
 ```
 
 
 
+# - - - - - - - - - - - - - - - - -  - - - - - - - - - - - - - - - - - - - - #
+#             Visualization of Differencial Expressed Peptides 
+# - - - - - - - - - - - - - - - -  - - - - - - - - - - - - - - - - - - - - - #
+
 ```{r}
-hnd$peptide <- rownames(hnd)
 
-df100 <- left_join(count_matrix, hnd, by= "peptide")
+result_table <- Hnd
+treatment_group <- 'Hnd'
+reference <- 'Zero'
 
-df100
+up <- sum(result_table$DE == "Upregulated")
+down <- sum(result_table$DE == "Downregulated")
+
+x_range <- range(result_table$log2FoldChange, finite = TRUE)
+y_range <- range(-log10(result_table$pvalue), finite = TRUE)
+annotation_x <- x_range[1] + c(0.2, 0.8) * diff(x_range)
+annotation_y <- y_range[1] + c(0.8, 0.75) * diff(y_range)
+
+# create a volcano plot for the current comparison
+volcano <- ggplot(
+    result_table,
+    aes(x = log2FoldChange, y = -log10(pvalue))
+  ) +
+    geom_point(aes(color = DE), alpha = 0.5, size = 1.5) +
+    scale_color_manual(
+      values = c(
+        "Upregulated" = "blue",
+        "Downregulated" = "red",
+        "Not significant" = "gray70"
+      )
+    ) +
+    labs(
+      title = "DESeq2 volcano plot",
+      subtitle = paste(treatment_group, "vs", reference),
+      x = "log2 fold change",
+      y = expression(-log[10](p-value)),
+      color = "Differential expression"
+    ) +
+    annotate(
+      geom = "text", x = annotation_x, y = rep(annotation_y[1], 2),
+      label = c("Down", "Up"), size = 5
+    ) +
+    annotate(
+      geom = "text", x = annotation_x, y = rep(annotation_y[2], 2),
+      label = c(down, up), size = 5
+    ) +
+    theme_bw()
+  
+volcano
 ```
+
 
 
 
@@ -345,34 +363,6 @@ plotPCA(rld, intgroup = "group", ntop = 500) +
 ```
 
 
-```{r, fig.height=3, fig.width=8}
-pca_data = rld_mtx[,c(1, 2, 3, 10, 11, 12)]
-
-# Transpose the data
-transposed_data <- t(pca_data)
-
-# Run PCA
-pca_result <- prcomp(transposed_data, center= TRUE, scale.= FALSE)
-
-#results
-df <- as.data.frame(pca_result$x)
-
-# creating the factors
-df$Group <- factor(c(rep("Uninduced", 3), rep("Induced", 3)))
-
-ggplot(df, aes(x = PC1, y = PC2, color = Group)) +
-  geom_point(size = 4) +
-  theme_light() +
-  ggtitle("Principal Component Analysis (PCA)") +
-  xlab(paste("PC1: ", round(summary(pca_result)$importance[2, 1]*100, 2), "% variance")) +
-  ylab(paste("PC2: ", round(summary(pca_result)$importance[2, 2]*100, 2), "% variance")) +
-  scale_x_continuous(breaks= seq(-15, 15, by = 5))
-
-#ggsave('results/pca_induced_x_uninduced_reads_counts.jpeg', width=8 , height=3 )
-
-```
-
-
 
 
 ## Sample Similarity
@@ -390,163 +380,6 @@ pheatmap(sampleDistMatrix,
          clustering_distance_rows=sampleDists,
          clustering_distance_cols=sampleDists,
          col=corBlues)
-
-```
-
-
-
-## Distribution of adjusted p-values
-```{r, fig.height=3, fig.width=9}
-par(mfrow=c(1,3))
-hist(resOne$padj, breaks=50, col="gray", main =('Analyzing values of ajusted p-values'),
-     xlab = 'p-value ajustado',
-     ylab = 'Frequency')
-
-hist(resTen$padj, breaks=50, col="gray",
-     xlab = 'p-value ajustado',
-     ylab = 'Frequency')
-
-hist(resHnd$padj, breaks=50, col="gray",
-     xlab = 'p-value ajustado',
-     ylab = 'Frequency')
-
-```
-High frequency around zero, represents DEs results
-
-
-## MA-Plot of LFCs vs Normalized countReads
-
-```{r, fig.height=4, fig.width=9}
-#jpeg("results/plotMA-dispersions2.jpeg", width = 1200, height = 700, quality = 200, res = 120)
-
-par(mfrow=c(1,3))
-plotMA(resOne, main='1uM IPTG vs 0uM IPTG', 
-       xlab='Mean counts')
-
-plotMA(resTen, main='10uM IPTG vs 0uM IPTG', 
-       xlab='Mean counts')
-
-plotMA(resHnd, main='100uM IPTG vs 0uM IPTG', 
-       xlab='Mean counts')
-
-```
-
-Each point is a peptide and blue points are differential expressed genes.
-
-Point above the line are up-regulated peptides and below the line down-regulated peptides
-
-Obs: The triangular points, represents points out of the plot window. 
-
-
-
-# - - - - - - - - - - - - - - - - -  - - - - - - - - - - - - - - - - - - - - #
-#             Visualization of Differencial Expressed Peptides 
-# - - - - - - - - - - - - - - - -  - - - - - - - - - - - - - - - - - - - - - #
-
-
-## Volcano plot 1uM IPTG vs 0uM IPTG
-```{r, fig.height=5, fig.width=8}
-legen <- one[row.names(one) %in% rownames(topDE), ]
-
-volcano = ggplot(one, aes(log2FoldChange, -log10(pvalue))) + 
-  geom_point(aes(col=DE)) +
-  scale_color_manual(values=c("red", "blue"))
-
-
-volcano + geom_label_repel(data= legen, aes(label= row.names(legen)), size=3, box.padding = unit(2, "lines"), point.padding = unit(5, "points"), max.overlaps = 100) +
-   labs(title= "Volcano plot of Diferencial Expressed Peptides",
-       subtitle = "Comparison of 1uM vs 0uM",
-       x= "log2 fold change", 
-       y= "p-value (-log10)",
-       color="Differential Expressed") +
-  scale_x_continuous(limits = c(-20, 20)) +
-  theme_bw() + coord_cartesian(clip = "off")
-
-ggsave(filename = "results/volcano_plot_one.jpeg", width = 8, height = 5, dpi = 300)
-```
-
-
-
-### Volcano plot 10uM IPTG vs 0uM IPTG
-```{r, fig.height=5, fig.width=8}
-legen <- ten[rownames(ten) %in% rownames(topDE), ]
-
-volcano = ggplot(ten, aes(log2FoldChange, -log10(pvalue))) + 
-  geom_point(aes(col=DE)) +
-  scale_color_manual(values=c("red", "blue"))
-
-
-volcano +
-  geom_label_repel(data= legen, aes(label= row.names(legen)), size=3, box.padding = unit(3, "lines"),
-                   point.padding = unit(5, "points"), max.overlaps =100) +
-   labs(title= "Volcano plot of Diferencial Expressed Peptides",
-       subtitle = "Comparison of 10uM vs 0uM",
-       x= "log2 fold change", 
-       y= "p-value (-log10)",
-       color="Differential Expressed") +
-  scale_x_continuous(limits = c(-20, 20)) +
-  theme_bw() + coord_cartesian(clip = "off")
-
-ggsave(filename = "results/volcano_plot_ten.jpeg", width = 8, height = 5, dpi = 300)
-```
-
-
-
-## Volcano plot 100uM IPTG vs 0uM IPTG
-```{r, fig.height=5, fig.width=8}
-legen <- hnd[rownames(hnd) %in% rownames(topDE), ]
-
-
-volcano = ggplot(hnd, aes(log2FoldChange, -log10(pvalue))) + 
-  geom_point(aes(col=DE)) +
-  scale_color_manual(values=c("red", "blue"))
-
-
-volcano + 
-  geom_label_repel(data= legen, aes(label= row.names(legen)), size=3, box.padding = unit(5, "lines"),
-                   point.padding = unit(5, "points"), max.overlaps =150) +
-  
-  labs(title= "Volcano plot of Diferencial Expressed Peptides",
-       subtitle = "Comparison of 100uM vs 0uM",
-       x= "log2 fold change", 
-       y= "p-value (-log10)",
-       color="Differential Expressed") +
-  scale_x_continuous(limits = c(-10, 8)) +
-  theme_bw() + coord_cartesian(clip = "off")
-
-#ggsave(file="results/volcano_plot_hdn.jpeg", height=5, width=8, dpi=300)
-```
-
-
-
-### Clustering genes with heatmap
-```{r, fig.height=10, fig.width=9}
-jpeg("results/pheatmap_z-score_top50DE_v01.jpeg", height=2000, width=1000, res = 120)
-
-#color pallet
-cores_heat <- colorRampPalette(brewer.pal(9, "YlOrRd"))(250)
-#cores_heat <- colorRampPalette(brewer.pal(9, "Blues"))(250)
-
-# order matrix by difference in mean variation
-tx <- order(-rowVars(rld_mtx))
-mat <- rld_mtx[tx, ]
-
-# z-score
-mat <- (mat - rowMeans(mat)) / sd(mat)
-
-# Filter matrix by peptides of interest
-mat <- rld_mtx[row.names(rld_mtx) %in% rownames(topDE), ]
-
-# description df
-descr <- data.frame(row.names = colnames(Counts), 
-                    Group = as.factor(rep(c("0uM", "1uM", "10uM", "100um"), each=3)))
-descr$Group <- factor(descr$Group, levels = c("0uM", "1uM", "10uM", "100um"))
-
-#Heatmap
-pheatmap(head(mat, 50), scale="row", cluster_rows=TRUE, show_rownames=TRUE,
-          show_colnames=T, cluster_cols=F, annotation_col=descr, col=cores_heat,
-         main = "The top 50 Peptides Differencial Expressed, colored by z-score")
-
 
 ```
 
