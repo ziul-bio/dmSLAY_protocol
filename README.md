@@ -31,7 +31,7 @@ sample_L001_R1_001.fastq.gz   sample_L001_R2_001.fastq.gz
 If a mate is missing, merging stops and prints the sample and unmatched filename.
 
 The 5-prime and 3-prime values are the flanking sequences immediately outside the
-region of interest. They default to the example dataset values:
+region of interest. Both sequences are required; these are the example dataset values:
 
 ```text
 5-prime: CTCCAGCTGCGGGTATCGGAGGAACC
@@ -45,62 +45,56 @@ Supply adapter FASTA files to override either default.
 
 ## 3. Run the full analysis
 
-Run the complete workflow with:
-
-```bash
-pixi run analyze --input-dir /path/to/paired/reads
-```
-
-To override the flank defaults:
+Run the complete workflow with all required arguments:
 
 ```bash
 pixi run analyze --input-dir /path/to/paired/reads \
   --five-prime-sequence CTCCAGCTGCGGGTATCGGAGGAACC \
-  --three-prime-sequence GTCGACCTGCAGGCATG
+  --three-prime-sequence GTCGACCTGCAGGCATG \
+  --coldata-file /path/to/coldata.tsv
 ```
 
-The workflow runs these stages in order:
+`--input-dir`, `--five-prime-sequence`, `--three-prime-sequence`, and
+`--coldata-file` are required. The script reports any missing arguments before
+starting the pipeline.
 
-- **Merge:** `fastp` merges each pair into `data/FASTQ_merged/` and writes HTML/JSON
-  reports to `results/fastp_reports/`. Unmerged R1/R2 reads are also retained.
+The workflow runs these stages in order. By default, output directories are created
+under the parent of the input directory. For example, with
+`--input-dir data/PG1/FASTQ`:
+
+- **Merge:** `fastp` merges each pair into `data/PG1/FASTQ_merged/` and writes HTML/JSON
+  reports to `data/PG1/results/fastp_reports/`. Unmerged R1/R2 reads are also retained.
 - **Trim:** `seqkit` selects the amplicon and `flexbar` trims adapters, writing FASTA
-  files to `data/FASTA_trimmed/`.
+  files to `data/PG1/FASTA_trimmed/`.
 - **Count:** translated peptide sequences are counted across samples and written to
-  `results/counts/peptide_read_counts.txt`. By default, peptides with fewer than 10
-  total reads are filtered out.
-- **DESeq2 (optional):** runs only when you provide `--coldata-file` or `--groups`.
-  Results are written to `results/deseq2/` by default.
+  `data/PG1/results/counts/peptide_read_counts.txt`. By default, peptides with fewer
+  than 10 total reads are filtered out.
+- **DESeq2:** uses the required `--coldata-file`. Results are written to
+  `data/PG1/results/deseq2/` by default.
 
 The main workflow options are:
 
 | Option | Purpose | Default |
 | --- | --- | --- |
-| `--input-dir DIR` | Paired FASTQ input directory | `data/FASTQ_raw/` |
-| `--merged-dir DIR` | Merged FASTQ output | `data/FASTQ_merged/` |
-| `--trimmed-dir DIR` | Trimmed FASTA output | `data/FASTA_trimmed/` |
-| `--results-dir DIR` | Peptide-count output directory | `results/counts/` |
-| `--report-dir DIR` | fastp HTML/JSON reports | `results/fastp_reports/` |
+| `--input-dir DIR` | Paired FASTQ input directory | Required |
+| `--merged-dir DIR` | Merged FASTQ output | `<input-parent>/FASTQ_merged/` |
+| `--trimmed-dir DIR` | Trimmed FASTA output | `<input-parent>/FASTA_trimmed/` |
+| `--results-dir DIR` | Peptide-count output directory | `<input-parent>/results/counts/` |
+| `--report-dir DIR` | fastp HTML/JSON reports | `<input-parent>/results/fastp_reports/` |
+| `--coldata-file FILE` | Sample and group metadata | Required |
 | `--threads N` | Worker threads for trimming tools | `32` |
 | `--minimum-count N` | Minimum total reads per peptide | `10` |
-| `--five-prime-sequence SEQ` | 5-prime flank | Example sequence above |
-| `--three-prime-sequence SEQ` | 3-prime flank | Example sequence above |
+| `--five-prime-sequence SEQ` | 5-prime flank | Required |
+| `--three-prime-sequence SEQ` | 3-prime flank | Required |
 | `--adapter-left FILE` | Left adapter FASTA override | 5-prime flank |
 | `--adapter-right FILE` | Right adapter FASTA override | 3-prime flank |
 
 Run `pixi run analyze --help` for the complete option list.
 
-## 4. Configure optional DESeq2 analysis
+## 4. Configure DESeq2 analysis
 
-DESeq2 requires a group for every sample. Provide groups inline or in a TSV/CSV file.
-
-For inline groups, use comma- or semicolon-separated `SAMPLE=GROUP` entries:
-
-```bash
-pixi run analyze --input-dir /path/to/paired/reads \
-  --groups "S1=Control,S2=Control,S3=Control,S4=Treated,S5=Treated,S6=Treated" \
-  --deseq2-reference Control \
-  --deseq2-treatment Treated
-```
+DESeq2 requires a group for every sample. Supply this information in a TSV/CSV
+metadata file with `--coldata-file`.
 
 For a metadata file, the script recognizes these sample-column names:
 `sample`, `sample_id`, `sample_name`, `Sample`, `SampleID`, or `name`. It recognizes
@@ -118,6 +112,8 @@ S6	Treated
 
 ```bash
 pixi run analyze --input-dir /path/to/paired/reads \
+  --five-prime-sequence CTCCAGCTGCGGGTATCGGAGGAACC \
+  --three-prime-sequence GTCGACCTGCAGGCATG \
   --coldata-file /path/to/coldata.tsv \
   --deseq2-reference Control \
   --deseq2-treatment Treated
