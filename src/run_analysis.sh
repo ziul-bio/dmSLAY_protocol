@@ -10,8 +10,6 @@ MERGED_DIR=""
 TRIMMED_DIR=""
 RESULTS_DIR=""
 REPORT_DIR=""
-ADAPTER_LEFT=""
-ADAPTER_RIGHT=""
 FIVE_PRIME_FLANK=""
 THREE_PRIME_FLANK=""
 THREADS=32
@@ -24,7 +22,7 @@ DESEQ2_MINIMUM_COUNT=30
 
 usage() {
     cat <<EOF
-Usage: bash scripts/run_analysis.sh --input-dir DIR --five-prime-sequence SEQ \\
+Usage: bash src/run_analysis.sh --input-dir DIR --five-prime-sequence SEQ \\
   --three-prime-sequence SEQ --coldata-file FILE [options]
 
 Required arguments:
@@ -38,8 +36,6 @@ Options:
   --trimmed-dir DIR                Trimmed FASTA output directory
   --results-dir DIR                Count output directory
   --report-dir DIR                 fastp report directory
-  -a, --adapter-left FILE          Optional left adapter FASTA override
-  -b, --adapter-right FILE         Optional right adapter FASTA override
   -f, --forward-sequence SEQ   Alias for 5-prime flanking sequence
   -r, --reverse-sequence SEQ   Alias for 3-prime flanking sequence
   -t, --threads N                  Worker threads
@@ -59,8 +55,6 @@ while [[ $# -gt 0 ]]; do
         --trimmed-dir) TRIMMED_DIR="$2"; shift 2 ;;
         --results-dir) RESULTS_DIR="$2"; shift 2 ;;
         --report-dir) REPORT_DIR="$2"; shift 2 ;;
-        -a|--adapter-left) ADAPTER_LEFT="$2"; shift 2 ;;
-        -b|--adapter-right) ADAPTER_RIGHT="$2"; shift 2 ;;
         -5|--five-prime-sequence) FIVE_PRIME_FLANK="$2"; shift 2 ;;
         -3|--three-prime-sequence) THREE_PRIME_FLANK="$2"; shift 2 ;;
         -f|--forward-sequence) FIVE_PRIME_FLANK="$2"; shift 2 ;;
@@ -88,12 +82,15 @@ if ((${#missing_args[@]} > 0)); then
     exit 2
 fi
 
-INPUT_PARENT_DIR="$(dirname "$INPUT_DIR")"
-MERGED_DIR="${MERGED_DIR:-$INPUT_PARENT_DIR/FASTQ_merged}"
-TRIMMED_DIR="${TRIMMED_DIR:-$INPUT_PARENT_DIR/FASTA_trimmed}"
-RESULTS_DIR="${RESULTS_DIR:-$INPUT_PARENT_DIR/results/counts}"
-REPORT_DIR="${REPORT_DIR:-$INPUT_PARENT_DIR/results/fastp_reports}"
-DESEQ2_OUTPUT_DIR="${DESEQ2_OUTPUT_DIR:-$INPUT_PARENT_DIR/results/deseq2}"
+INPUT_NAME="$(basename "$(dirname "$INPUT_DIR")")"
+OUTPUT_DIR="$PROJECT_DIR/results/$INPUT_NAME"
+# if the user did not define the MERGED_DIR, TRIMMED_DIR, RESULTS_DIR, REPORT_DIR, or DESEQ2_OUTPUT_DIR variables,
+# default directories are assigned and are listed below after -$
+MERGED_DIR="${MERGED_DIR:-$OUTPUT_DIR/FASTQ_merged}"
+TRIMMED_DIR="${TRIMMED_DIR:-$OUTPUT_DIR/FASTA_trimmed}"
+RESULTS_DIR="${RESULTS_DIR:-$OUTPUT_DIR/counts}"
+REPORT_DIR="${REPORT_DIR:-$OUTPUT_DIR/fastp_reports}"
+DESEQ2_OUTPUT_DIR="${DESEQ2_OUTPUT_DIR:-$OUTPUT_DIR/deseq2}"
 
 python3 "$SCRIPT_DIR/merge_reads.py" \
     --input-dir "$INPUT_DIR" \
@@ -103,8 +100,6 @@ python3 "$SCRIPT_DIR/merge_reads.py" \
 bash "$SCRIPT_DIR/trim_reads.sh" \
     -i "$MERGED_DIR" \
     -o "$TRIMMED_DIR" \
-    -a "$ADAPTER_LEFT" \
-    -b "$ADAPTER_RIGHT" \
     -t "$THREADS" \
     -5 "$FIVE_PRIME_FLANK" \
     -3 "$THREE_PRIME_FLANK"

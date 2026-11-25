@@ -3,35 +3,31 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
 # Usage:
-# bash scripts/trim_reads.sh \
+# bash src/trim_reads.sh \
 #     -i data/FASTQ_merged \
 #     -o data/FASTA_trimmed \
-#     -t 32 \
+#     -t 8 \
 #     -5 CTCCAGCTGCGGGTATCGGAGGAACC \
 #     -3 GTCGACCTGCAGGCATG
 
 
 # Default parameters
+THREADS=4
 INPUT_DIR=""
-TRIMMED_DIR="data/FASTA_trimmed"
+TRIMMED_DIR=""
 
-ADAPTER_LEFT=""
-ADAPTER_RIGHT=""
-
-THREADS=50
-
-FIVE_PRIME_FLANK="CTCCAGCTGCGGGTATCGGAGGAACC"
-THREE_PRIME_FLANK="GTCGACCTGCAGGCATG"
-
+FIVE_PRIME_FLANK=""
+THREE_PRIME_FLANK=""
 
 # Parse arguments
-while getopts ":i:o:a:b:t:f:r:5:3:h" opt; do
+while getopts ":i:o:t:f:r:5:3:h" opt; do
     case "$opt" in
         i) INPUT_DIR="$OPTARG" ;;
         o) TRIMMED_DIR="$OPTARG" ;;
-        a) ADAPTER_LEFT="$OPTARG" ;;
-        b) ADAPTER_RIGHT="$OPTARG" ;;
         t) THREADS="$OPTARG" ;;
         f|5) FIVE_PRIME_FLANK="$OPTARG" ;;
         r|3) THREE_PRIME_FLANK="$OPTARG" ;;
@@ -40,12 +36,10 @@ while getopts ":i:o:a:b:t:f:r:5:3:h" opt; do
             echo ""
             echo "Options:"
             echo "  -i  Input FASTQ directory (required)"
-            echo "  -o  Output FASTA directory (default: $TRIMMED_DIR)"
-            echo "  -a  Optional left adapter file (overrides -5)"
-            echo "  -b  Optional right adapter file (overrides -3)"
+            echo "  -o  Output FASTA directory (default: results/<parent-name>/FASTA_trimmed)"
             echo "  -t  Number of threads (default: $THREADS)"
-            echo "  -5  5-prime (forward) flanking sequence"
-            echo "  -3  3-prime (reverse) flanking sequence"
+            echo "  -5  5-prime (forward) flanking sequence (required)"
+            echo "  -3  3-prime (reverse) flanking sequence (required)"
             echo "  -f  Alias for -5"
             echo "  -r  Alias for -3"
             echo "  -h  Display this help message"
@@ -62,6 +56,9 @@ while getopts ":i:o:a:b:t:f:r:5:3:h" opt; do
     esac
 done
 
+normalize_sequence() {
+    printf '%s' "$1" | tr '[:lower:]' '[:upper:]' | tr -d '[:space:]'
+}
 
 # Validate required arguments
 if [[ -z "$INPUT_DIR" ]]; then
@@ -74,6 +71,18 @@ fi
 if [[ ! -d "$INPUT_DIR" ]]; then
     echo "Error: input directory does not exist: $INPUT_DIR"
     exit 1
+fi
+
+FIVE_PRIME_FLANK="$(normalize_sequence "$FIVE_PRIME_FLANK")"
+THREE_PRIME_FLANK="$(normalize_sequence "$THREE_PRIME_FLANK")"
+if [[ -z "$FIVE_PRIME_FLANK" || -z "$THREE_PRIME_FLANK" ]]; then
+    echo "Error: both 5-prime (-5/-f) and 3-prime (-3/-r) sequences are required." >&2
+    exit 1
+fi
+
+if [[ -z "$TRIMMED_DIR" ]]; then
+    INPUT_NAME="$(basename "$(dirname "$INPUT_DIR")")"
+    TRIMMED_DIR="$PROJECT_DIR/results/$INPUT_NAME/FASTA_trimmed"
 fi
 
 
@@ -100,13 +109,6 @@ mkdir -p "$TRIMMED_DIR"
 # Create temporary directory and configure cleanup
 TEMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TEMP_DIR"' EXIT
-
-
-
-normalize_sequence() { # Normalize a DNA sequence to uppercase and remove whitespace
-    printf '%s' "$1" | tr '[:lower:]' '[:upper:]' | tr -d '[:space:]'
-}
-
 
 
 reverse_complement() {
@@ -172,37 +174,13 @@ except ValueError as e:
 PY
 }
 
-
-
-FIVE_PRIME_FLANK="$(normalize_sequence "$FIVE_PRIME_FLANK")"
-THREE_PRIME_FLANK="$(normalize_sequence "$THREE_PRIME_FLANK")"
+# Compute the reverse complement of the 3' flank.
 REVERSE_AMPLICON="$(reverse_complement "$THREE_PRIME_FLANK")"
-
-
 
 # Flexbar trims in read orientation. Use the 5' flank on the left and the
 # original 3' flank on the right; only the seqkit -R sequence is reversed.
 printf '>five_prime_flank\n%s\n' "$FIVE_PRIME_FLANK" > "${TEMP_DIR}/five_prime_flank.fasta"
 printf '>three_prime_flank\n%s\n' "$THREE_PRIME_FLANK" > "${TEMP_DIR}/three_prime_flank.fasta"
-
-if [[ -z "$ADAPTER_LEFT" ]]; then
-    ADAPTER_LEFT="${TEMP_DIR}/five_prime_flank.fasta"
-fi
-if [[ -z "$ADAPTER_RIGHT" ]]; then
-    ADAPTER_RIGHT="${TEMP_DIR}/three_prime_flank.fasta"
-fi
-
-if [[ -f "$ADAPTER_LEFT" ]]; then
-    HAS_ADAPTER_LEFT=true
-else
-    HAS_ADAPTER_LEFT=false
-fi
-if [[ -f "$ADAPTER_RIGHT" ]]; then
-    HAS_ADAPTER_RIGHT=true
-else
-    HAS_ADAPTER_RIGHT=false
-fi
-
 
 # Identify input files
 shopt -s nullglob
@@ -267,30 +245,24 @@ for FASTQ in "${FASTQ_FILES[@]}"; do
 
     CURRENT="${TEMP_DIR}/${sample}.fasta"
 
-    if [[ "$HAS_ADAPTER_LEFT" == true ]]; then
-        echo "Trimming left adapter..."
-        flexbar --threads "$THREADS" -ae 0.1 \
-            --reads "$CURRENT" \
-            --adapters "$ADAPTER_LEFT" \
-            --adapter-trim-end LEFT \
-            --target "${TEMP_DIR}/${sample}_left_tmp"
-        CURRENT="${TEMP_DIR}/${sample}_left_tmp.fasta"
-        if [[ ! -f "$CURRENT" ]]; then
-            echo "Error: Flexbar did not generate the left-trimmed FASTA for $sample."
-            exit 1
-        fi
+    echo "Trimming left adapter..."
+    flexbar --threads "$THREADS" -ae 0.1 \
+        --reads "$CURRENT" \
+        --adapters "${TEMP_DIR}/five_prime_flank.fasta" \
+        --adapter-trim-end LEFT \
+        --target "${TEMP_DIR}/${sample}_left_tmp"
+    CURRENT="${TEMP_DIR}/${sample}_left_tmp.fasta"
+    if [[ ! -f "$CURRENT" ]]; then
+        echo "Error: Flexbar did not generate the left-trimmed FASTA for $sample."
+        exit 1
     fi
 
-    if [[ "$HAS_ADAPTER_RIGHT" == true ]]; then
-        echo "Trimming right adapter..."
-        flexbar --threads "$THREADS" -ae 0.1 \
-            --reads "$CURRENT" \
-            --adapters "$ADAPTER_RIGHT" \
-            --adapter-trim-end RIGHT \
-            --target "${TRIMMED_DIR}/${sample}"
-    elif [[ "$CURRENT" != "${TRIMMED_DIR}/${sample}.fasta" ]]; then
-        cp "$CURRENT" "${TRIMMED_DIR}/${sample}.fasta"
-    fi
+    echo "Trimming right adapter..."
+    flexbar --threads "$THREADS" -ae 0.1 \
+        --reads "$CURRENT" \
+        --adapters "${TEMP_DIR}/three_prime_flank.fasta" \
+        --adapter-trim-end RIGHT \
+        --target "${TRIMMED_DIR}/${sample}"
 
 
     # Processing time
