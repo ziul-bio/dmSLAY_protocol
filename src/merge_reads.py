@@ -10,12 +10,22 @@ from pair_fastq import discover_pairs
 def main():
     parser = argparse.ArgumentParser(description="Merge paired FASTQ reads with fastp")
     parser.add_argument("-i", "--input-dir", required=True, type=Path)
-    parser.add_argument("-o", "--output-dir", default=Path("data/FASTQ_merged"), type=Path)
-    parser.add_argument("-r", "--report-dir", default=Path("results/fastp_reports"), type=Path)
+    parser.add_argument(
+        "-o", "--output-dir", type=Path,
+        help="Merged FASTQ output directory (default: results/<parent-name>/FASTQ_merged)",
+    )
+    parser.add_argument(
+        "-r", "--report-dir", type=Path,
+        help="fastp report directory (default: results/<parent-name>/fastp_reports)",
+    )
     args = parser.parse_args()
 
     if not args.input_dir.is_dir():
         parser.error(f"input directory does not exist: {args.input_dir}")
+
+    output_root = Path(__file__).resolve().parent.parent / "results" / args.input_dir.parent.name
+    args.output_dir = args.output_dir or output_root / "FASTQ_merged"
+    args.report_dir = args.report_dir or output_root / "fastp_reports"
 
     pairs, unpaired = discover_pairs(args.input_dir)
     if unpaired:

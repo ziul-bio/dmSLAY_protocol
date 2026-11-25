@@ -11,15 +11,26 @@ warnings.filterwarnings("ignore", category=BiopythonWarning, message="Partial co
 import argparse
 parser = argparse.ArgumentParser(description='Count the number of reads in a FASTA file')
 parser.add_argument('--input_dir', '-i', required=True, help='The directory containing the FASTA files')
-parser.add_argument('--output_dir','-o', required=True, help='The directory to write the results to')
+parser.add_argument(
+    '--output_dir',
+    '-o',
+    help='The directory to write the results to (default: results/<parent-name>/counts)',
+)
 parser.add_argument('--minimum-count', '-m', type=int, default=10,
                     help='Minimum total read count to include a peptide (default: 10)')
 args = parser.parse_args()
 
 input_dir = Path(args.input_dir)
-output_dir = Path(args.output_dir)
 if not input_dir.is_dir():
     parser.error(f"input directory does not exist: {input_dir}")
+output_dir = (
+    Path(args.output_dir)
+    if args.output_dir
+    else Path(__file__).resolve().parent.parent
+    / "results"
+    / input_dir.parent.name
+    / "counts"
+)
 output_dir.mkdir(parents=True, exist_ok=True)
 
 print('')
