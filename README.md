@@ -40,54 +40,55 @@ region of interest. Both sequences are required; these are the example dataset v
 
 For amplicon selection, the 5-prime flank is passed to `seqkit amplicon -F`. The
 3-prime flank is reverse-complemented for `seqkit amplicon -R`. By default, the
-original flanks are also used as the left and right Flexbar adapter sequences.
-Supply adapter FASTA files to override either default.
+same two flank sequences are used as the left and right Flexbar adapter sequences.
+The workflow accepts flank sequences directly and does not accept adapter FASTA overrides.
 
 ## 3. Run the full analysis
 
 Run the complete workflow with all required arguments:
 
 ```bash
-pixi run analyze --input-dir /path/to/paired/reads \
+pixi run analyze --input-dir data/example/FASTQ/ \
   --five-prime-sequence CTCCAGCTGCGGGTATCGGAGGAACC \
   --three-prime-sequence GTCGACCTGCAGGCATG \
-  --coldata-file /path/to/coldata.tsv
+  --coldata-file data/example/coldata.tsv
 ```
 
 `--input-dir`, `--five-prime-sequence`, `--three-prime-sequence`, and
 `--coldata-file` are required. The script reports any missing arguments before
 starting the pipeline.
 
-The workflow runs these stages in order. By default, output directories are created
-under the parent of the input directory. For example, with
-`--input-dir data/PG1/FASTQ`:
+The workflow reads input data from the directory provided with `--input-dir`. By
+default, all generated files are written under `results/` using the name of the
+input directory's parent. For example, `--input-dir data/PG1/FASTQ` writes
+outputs under `results/PG1/`:
 
-- **Merge:** `fastp` merges each pair into `data/PG1/FASTQ_merged/` and writes HTML/JSON
-  reports to `data/PG1/results/fastp_reports/`. Unmerged R1/R2 reads are also retained.
+- **Merge:** `fastp` writes merged and unmerged FASTQ files to
+  `results/PG1/FASTQ_merged/` and HTML/JSON reports to
+  `results/PG1/fastp_reports/`.
 - **Trim:** `seqkit` selects the amplicon and `flexbar` trims adapters, writing FASTA
-  files to `data/PG1/FASTA_trimmed/`.
+  files to `results/PG1/FASTA_trimmed/`.
 - **Count:** translated peptide sequences are counted across samples and written to
-  `data/PG1/results/counts/peptide_read_counts.txt`. By default, peptides with fewer
+  `results/PG1/counts/peptide_read_counts.txt`. By default, peptides with fewer
   than 10 total reads are filtered out.
 - **DESeq2:** uses the required `--coldata-file`. Results are written to
-  `data/PG1/results/deseq2/` by default.
+  `results/PG1/deseq2/` by default.
 
 The main workflow options are:
 
 | Option | Purpose | Default |
 | --- | --- | --- |
 | `--input-dir DIR` | Paired FASTQ input directory | Required |
-| `--merged-dir DIR` | Merged FASTQ output | `<input-parent>/FASTQ_merged/` |
-| `--trimmed-dir DIR` | Trimmed FASTA output | `<input-parent>/FASTA_trimmed/` |
-| `--results-dir DIR` | Peptide-count output directory | `<input-parent>/results/counts/` |
-| `--report-dir DIR` | fastp HTML/JSON reports | `<input-parent>/results/fastp_reports/` |
+| `--merged-dir DIR` | Merged FASTQ output | `results/<parent-name>/FASTQ_merged/` |
+| `--trimmed-dir DIR` | Trimmed FASTA output | `results/<parent-name>/FASTA_trimmed/` |
+| `--results-dir DIR` | Peptide-count output directory | `results/<parent-name>/counts/` |
+| `--report-dir DIR` | fastp HTML/JSON reports | `results/<parent-name>/fastp_reports/` |
+| `--deseq2-output-dir DIR` | DESeq2 output directory | `results/<parent-name>/deseq2/` |
 | `--coldata-file FILE` | Sample and group metadata | Required |
 | `--threads N` | Worker threads for trimming tools | `32` |
 | `--minimum-count N` | Minimum total reads per peptide | `10` |
 | `--five-prime-sequence SEQ` | 5-prime flank | Required |
 | `--three-prime-sequence SEQ` | 3-prime flank | Required |
-| `--adapter-left FILE` | Left adapter FASTA override | 5-prime flank |
-| `--adapter-right FILE` | Right adapter FASTA override | 3-prime flank |
 
 Run `pixi run analyze --help` for the complete option list.
 
@@ -111,10 +112,10 @@ S6	Treated
 ```
 
 ```bash
-pixi run analyze --input-dir /path/to/paired/reads \
+pixi run analyze --input-dir data/example/FASTQ/ \
   --five-prime-sequence CTCCAGCTGCGGGTATCGGAGGAACC \
   --three-prime-sequence GTCGACCTGCAGGCATG \
-  --coldata-file /path/to/coldata.tsv \
+  --coldata-file data/example/coldata.tsv \
   --deseq2-reference Control \
   --deseq2-treatment Treated
 ```
@@ -130,17 +131,19 @@ These tasks are useful when you want to run or repeat a single stage. Run them i
 pipeline order, using the previous stage's output as the next stage's input.
 
 ```bash
-pixi run merge --input-dir /path/to/paired/reads
-pixi run trim -i data/FASTQ_merged \
+pixi run merge --input-dir data/example/FASTQ
+
+pixi run trim -i results/example/FASTQ_merged \
   -5 CTCCAGCTGCGGGTATCGGAGGAACC \
   -3 GTCGACCTGCAGGCATG
-pixi run count -i data/FASTA_trimmed -o results/counts
+
+pixi run count -i results/example/FASTA_trimmed
+
 pixi run deseq2 \
-  --count-file results/counts/peptide_read_counts.txt \
-  --coldata-file data/coldata.tsv \
+  --count-file results/example/counts/peptide_read_counts.txt \
+  --coldata-file data/examplecoldata.tsv \
   --reference Control \
-  --treatment Treated \
-  --output-dir results/deseq2
+  --treatment Treated
 ```
 
 ## Troubleshooting installation

@@ -15,8 +15,8 @@ r-ggplot2 = ">=3.5"
 bioconductor-deseq2 = ">=1.42"
 
 [tasks]
-analyze = "bash scripts/run_analysis.sh"
-merge = "python scripts/merge_reads.py"
-trim = "bash scripts/trim_reads.sh"
-count = "python scripts/count_reads.py"
-deseq2 = "Rscript scripts/deseq2.r"
+analyze = "bash src/run_analysis.sh"
+merge = "python src/merge_reads.py"
+trim = "bash src/trim_reads.sh"
+count = "python src/count_reads.py"
+deseq2 = "Rscript src/deseq2.r"
