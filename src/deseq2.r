@@ -33,7 +33,10 @@ coldata_file <- get_arg("coldata-file", c("coldata", "samples"))
 groups_arg <- get_arg("groups")
 reference <- get_arg("reference", c("ref"))
 treatment <- get_arg("treatment", c("contrast"))
-output_dir <- get_arg("output-dir", c("output"), "results/deseq2")
+output_dir <- get_arg("output-dir", c("output"))
+if (is.null(output_dir)) {
+  output_dir <- file.path(dirname(dirname(count_file)), "deseq2")
+}
 alpha <- as.numeric(get_arg("alpha", default = "0.05"))
 lfc_threshold <- as.numeric(get_arg("lfc-threshold", default = "1"))
 minimum_count <- as.integer(get_arg("minimum-count", default = "30"))
@@ -258,14 +261,6 @@ for (treatment_group in treatments) {
     row.names = FALSE
   )
 
-  # this will list only the top DE peptides with the negative log2FoldChange (downregulated) and padj < alpha, sorted by padj.
-  top_de <- result_table[
-    !is.na(result_table$padj) &
-      result_table$padj < alpha &
-      result_table$log2FoldChange < -(lfc_threshold),
-  ]
-  top_de <- top_de[order(top_de$padj, na.last = TRUE), , drop = FALSE]
-
   up <- sum(result_table$DE == "Upregulated")
   down <- sum(result_table$DE == "Downregulated")
 
@@ -279,7 +274,7 @@ for (treatment_group in treatments) {
     result_table,
     aes(x = log2FoldChange, y = -log10(pvalue))
   ) +
-    geom_point(aes(color = DE), alpha = 0.7, size = 1.5) +
+    geom_point(aes(color = DE), alpha = 0.5, size = 1.5) +
     scale_color_manual(
       values = c(
         "Upregulated" = "blue",
