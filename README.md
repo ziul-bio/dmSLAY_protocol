@@ -1,7 +1,7 @@
 # dmSLAY protocol
 
 This repository provides a reproducible Pixi workflow for processing paired amplicon reads:
-merge reads, trim amplicon flanks and adapters, count peptide sequences, and optionally
+merge reads, identify and extract amplicon sequences, count peptide sequences, and optionally
 run differential-expression analysis with DESeq2.
 
 ## 1. Install the environment
@@ -41,11 +41,11 @@ Both sequences are required; see below the sequences in the example data:
 3-prime: GTCGACCTGCAGGCATG
 ```
 
-For amplicon selection, the 5-prime flank is passed to `seqkit amplicon -F`. The
-3-prime flank is reverse-complemented for `seqkit amplicon -R`. By default, the
-same two flank sequences are used as the left and right Flexbar adapter sequences.
-The workflow accepts flank sequences directly and will convert it into fasta files     
-and generate the reverve complenet of the 3' required by flexbar.
+For amplicon selection and extraction, the 5-prime flank is passed to
+`seqkit amplicon -F`, and the reverse complement of the 3-prime flank is passed to
+`seqkit amplicon -R`. The extraction region is calculated from both flank lengths,
+so the matching flanks are excluded. The selected reads are converted directly from
+FASTQ to FASTA with `seqkit fq2fa`; read identifiers are preserved.
 
 
 ## 3. Configure DESeq2 analysis
@@ -81,11 +81,12 @@ Run the complete workflow with all required arguments:
 
 ```bash
 pixi run analyze --input-dir data/example/FASTQ/ \
-  --five-prime-sequence CTCCAGCTGCGGGTATCGGAGGAACC \
-  --three-prime-sequence GTCGACCTGCAGGCATG \
+  --five-prime-sequence GGAGGAACC \
+  --three-prime-sequence GTCGACCTG \
   --coldata-file data/example/coldata.tsv \
   --deseq2-reference Control \
-  --deseq2-treatment Treated
+  --deseq2-treatment Treated \
+  --threads 4
 ```
 
 `--input-dir`, `--five-prime-sequence`, `--three-prime-sequence`, and
@@ -100,8 +101,9 @@ outputs under `results/PG1/`:
 - **Merge:** `fastp` writes merged and unmerged FASTQ files to
   `results/PG1/FASTQ_merged/` and HTML/JSON reports to
   `results/PG1/fastp_reports/`.
-- **Trim:** `seqkit` selects the amplicon and `flexbar` trims adapters, writing FASTA
-  files to `results/PG1/FASTA_trimmed/`.
+- **Amplicon extraction:** `seqkit amplicon` identifies reads and removes both
+  matching flanks in one operation, then `seqkit fq2fa` writes FASTA files to
+  `results/PG1/FASTA_trimmed/`.
 - **Count:** translated peptide sequences are counted across samples and written to
   `results/PG1/counts/peptide_read_counts.txt`. By default, peptides with fewer
   than 10 total reads are filtered out.
@@ -119,7 +121,7 @@ The main workflow options are:
 | `--report-dir DIR` | fastp HTML/JSON reports | `results/<parent-name>/fastp_reports/` |
 | `--deseq2-output-dir DIR` | DESeq2 output directory | `results/<parent-name>/deseq2/` |
 | `--coldata-file FILE` | Sample and group metadata | Required |
-| `--threads N` | Worker threads for trimming tools | `32` |
+| `--threads N` | Worker threads for amplicon extraction | `32` |
 | `--minimum-count N` | Minimum total reads per peptide | `10` |
 | `--five-prime-sequence SEQ` | 5-prime flank | Required |
 | `--three-prime-sequence SEQ` | 3-prime flank | Required |
@@ -137,8 +139,8 @@ pipeline order, using the previous stage's output as the next stage's input.
 pixi run merge --input-dir data/example/FASTQ
 
 pixi run trim -i results/example/FASTQ_merged \
-  -5 CTCCAGCTGCGGGTATCGGAGGAACC \
-  -3 GTCGACCTGCAGGCATG
+  -5 GGAGGAACC \
+  -3 GTCGACCTG
 
 pixi run count -i results/example/FASTA_trimmed
 
