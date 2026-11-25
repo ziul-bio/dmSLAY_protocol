@@ -94,7 +94,7 @@ fi
 
 
 # Check dependencies
-for cmd in seqkit flexbar; do
+for cmd in seqkit; do
     command -v "$cmd" >/dev/null 2>&1 || {
         echo "Error: $cmd is not installed or not in PATH."
         exit 1
@@ -104,11 +104,6 @@ done
 
 # Create output directory
 mkdir -p "$TRIMMED_DIR"
-
-
-# Create temporary directory and configure cleanup
-TEMP_DIR=$(mktemp -d)
-trap 'rm -rf "$TEMP_DIR"' EXIT
 
 
 reverse_complement() {
@@ -177,11 +172,6 @@ PY
 # Compute the reverse complement of the 3' flank.
 REVERSE_AMPLICON="$(reverse_complement "$THREE_PRIME_FLANK")"
 
-# Flexbar trims in read orientation. Use the 5' flank on the left and the
-# original 3' flank on the right; only the seqkit -R sequence is reversed.
-printf '>five_prime_flank\n%s\n' "$FIVE_PRIME_FLANK" > "${TEMP_DIR}/five_prime_flank.fasta"
-printf '>three_prime_flank\n%s\n' "$THREE_PRIME_FLANK" > "${TEMP_DIR}/three_prime_flank.fasta"
-
 # Identify input files
 shopt -s nullglob
 FASTQ_FILES=()
@@ -197,10 +187,9 @@ fi
 
 # Pipeline information
 echo "************************************************************"
-echo "                    Read Trimming"
+echo "                 Amplicon Extraction"
 echo "************************************************************"
 echo "Input directory: $INPUT_DIR"
-echo "Temporary directory: $TEMP_DIR"
 echo "Output directory: $TRIMMED_DIR"
 echo "Threads: $THREADS"
 echo "Samples found: ${#FASTQ_FILES[@]}"
@@ -232,37 +221,16 @@ for FASTQ in "${FASTQ_FILES[@]}"; do
     echo "------------------------------------------------------------"
 
 
-    # Step 1: Filter reads by amplicon and convert to FASTA
-    echo "Filtering reads by amplicon and converting to FASTA..."
+    # Identify reads containing the amplicon, trim both flanks, and convert to FASTA.
+    echo "Selecting and extracting amplicon reads to FASTA..."
 
-    seqkit amplicon --threads "$THREADS" -m 2 \
+    seqkit amplicon --threads "$THREADS" -m 0 \
         -F "$FIVE_PRIME_FLANK" \
         -R "$REVERSE_AMPLICON" \
+        -r "$(( ${#FIVE_PRIME_FLANK} + 1 )):-$(( ${#REVERSE_AMPLICON} + 1 ))" \
         "$FASTQ" | \
         seqkit fq2fa --threads "$THREADS" \
-        > "${TEMP_DIR}/${sample}.fasta"
-
-
-    CURRENT="${TEMP_DIR}/${sample}.fasta"
-
-    echo "Trimming left adapter..."
-    flexbar --threads "$THREADS" -ae 0.1 \
-        --reads "$CURRENT" \
-        --adapters "${TEMP_DIR}/five_prime_flank.fasta" \
-        --adapter-trim-end LEFT \
-        --target "${TEMP_DIR}/${sample}_left_tmp"
-    CURRENT="${TEMP_DIR}/${sample}_left_tmp.fasta"
-    if [[ ! -f "$CURRENT" ]]; then
-        echo "Error: Flexbar did not generate the left-trimmed FASTA for $sample."
-        exit 1
-    fi
-
-    echo "Trimming right adapter..."
-    flexbar --threads "$THREADS" -ae 0.1 \
-        --reads "$CURRENT" \
-        --adapters "${TEMP_DIR}/three_prime_flank.fasta" \
-        --adapter-trim-end RIGHT \
-        --target "${TRIMMED_DIR}/${sample}"
+        > "${TRIMMED_DIR}/${sample}.fasta"
 
 
     # Processing time
